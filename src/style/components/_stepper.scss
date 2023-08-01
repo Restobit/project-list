@@ -1,0 +1,16 @@
+.stepper {
+  padding: 3vh 0 !important;
+  &__step {
+    border: 1px solid #2b7cff !important;
+    cursor: default !important;
+  }
+
+  &__step + div > span {
+    color: #0f6bff !important;
+  }
+}
+
+.step-buttons {
+  display: flex;
+  justify-content: space-between;
+}
