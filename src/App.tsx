@@ -1,31 +1,38 @@
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef, FormEvent } from "react";
 import AddIcon from "@mui/icons-material/Add";
 import SaveIcon from "@mui/icons-material/Save";
 import Button from "@mui/material/Button";
 import Box from "@mui/material/Box";
 import Modal from "@mui/material/Modal";
+import IconButton from "@mui/material/IconButton";
+import InfoIcon from "@mui/icons-material/Info";
+import { INITIAL_FORM_DATA } from "./utils/constants";
 import { Stepper } from "react-form-stepper";
 import { Project } from "./ts/interfaces";
-import ProjectForm from "./components/projectForm/ProjectForm";
 import { useDebounce } from "use-debounce";
 import { shortProjectName } from "./utils/shortProjectName";
 import { asyncFetchProjects } from "./services/asyncFetchProjects";
+import { useMultistepForm } from "./hooks/useMultistepForm";
+import { ProjectFields } from "./components/form/ProjectFields/ProjectFields";
+import { ColleagueFields } from "./components/form/ColleagueFields/ColleagueFields";
+import { LinkFields } from "./components/form/LinkFields/LinkFields";
+import CardInfo from "./components/CardInfo/CardInfo";
 import "./App.scss";
 import "./style/main.scss";
 
-const style = {
+const BoxStyle = {
   position: "absolute",
   top: "50%",
   left: "50%",
   transform: "translate(-50%, -50%)",
   width: "40rem",
-  height: "30rem",
+  height: "40rem",
   bgcolor: "background.paper",
   border: "1px solid #000",
   p: 4,
   display: "flex",
   flexDirection: "column",
-  justifyContent: "space-between",
+  justifyContent: "flex-start",
   overflowX: "auto",
 };
 
@@ -35,27 +42,32 @@ function App() {
   const [debouncedFilter] = useDebounce(inputRef.current?.value, 500);
   const [projects, setProjects] = useState<Project[]>([]);
   const [savedProjects, setSavedProjects] = useState<Project[]>([]);
-  const [projectFormData, setProjectFormData] = useState<Project>({
-    id: 1,
-    name: "",
-    title: "",
-  });
+  const [formData, setFormData] = useState<Project>(INITIAL_FORM_DATA);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const handleOpen = () => setOpen(true);
   const handleClose = () => setOpen(false);
-  const [step, setStep] = useState(0);
-  const increseStep = () => {
-    if (step < 2) {
-      setStep(step + 1);
-    }
+  const [showCardInfo, setShowCardInfo] = useState(false);
+  const handleCloseShowInfo = () => setShowCardInfo(false);
+  const [showCardIndex, setShowCardIndex] = useState<number>(0);
+
+  const showMoreInfo = (index: number) => {
+    setShowCardInfo(true);
+    setShowCardIndex(index);
   };
-  const decreaseStep = () => {
-    if (step > 0) {
-      setStep(step - 1);
-    }
-  };
+
+  function updateFields(fields: Partial<Project>) {
+    setFormData((prev) => {
+      return { ...prev, ...fields };
+    });
+  }
+
+  const { currentStepIndex, formStep, isFirstStep, isLastStep, back, next, goTo } = useMultistepForm([
+    <ProjectFields {...formData} updateFields={updateFields} />,
+    <ColleagueFields {...formData} updateFields={updateFields} />,
+    <LinkFields {...formData} updateFields={updateFields} />,
+  ]);
 
   const memoizedAsyncFetchProjects = useMemo(() => asyncFetchProjects(), []);
 
@@ -78,7 +90,7 @@ function App() {
     if (searchInput.length > 0) {
       const filteredProjectsByName = projects.filter((project) => {
         if (inputRef.current) {
-          return project.name.match(inputRef?.current?.value.toLowerCase());
+          return project.projectName.match(inputRef?.current?.value.toLowerCase());
         }
         return [];
       });
@@ -89,28 +101,28 @@ function App() {
     }
   }, [debouncedFilter]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    setSearchInput(e.target.value.toLowerCase());
+    setSearchInput(e.target.value.trim().toLowerCase());
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!isLastStep) return next();
+
+    goTo(0);
     handleClose();
-    setProjectFormData({
-      id: 1,
-      name: "",
+    setProjects((prevProjects) => [...prevProjects, ...[formData]]);
+    setSavedProjects((prevProjects) => [...prevProjects, ...[formData]]);
+    setFormData({
+      projectName: "",
       title: "",
+      colleagues: [{ name: "", position: "" }],
+      links: [{ url: "" }],
     });
+  }
 
-    setProjects((prevProjects) => [...prevProjects, ...[projectFormData]]);
-    setSavedProjects((prevProjects) => [...prevProjects, ...[projectFormData]]);
-    setStep(0);
-  };
-
-  const disableNextButton =
-    (projectFormData.title!.length > 0 && projectFormData.title!.length < 50) ||
-    projectFormData.name!.length === 0;
+  const hasTextareaLengthError = formData.title!.length > 0 && formData.title!.length < 50;
 
   return (
     <div>
@@ -120,15 +132,11 @@ function App() {
             type="text"
             className="search-term"
             placeholder="Keresés"
-            onChange={handleChange}
+            onChange={handleSearchChange}
             ref={inputRef}
           />
         </div>
-        <Button
-          variant="contained"
-          onClick={handleOpen}
-          startIcon={<AddIcon />}
-        >
+        <Button variant="contained" onClick={handleOpen} startIcon={<AddIcon />}>
           Új projekt
         </Button>
       </nav>
@@ -141,17 +149,21 @@ function App() {
           <p>{error}</p>
         ) : projects.length > 0 ? (
           <div className="card-list">
-            {projects.map((project) => (
-              <div className="card">
+            {projects.map((project, index) => (
+              <div key={index} className="card">
                 <img
-                  src={
-                    "https://fakeimg.pl/100x100/ffffff/66b3ff?text=" +
-                    shortProjectName(project.name)
-                  }
-                  alt={project.name}
+                  src={"https://fakeimg.pl/100x100/ffffff/66b3ff?text=" + shortProjectName(project.projectName)}
+                  alt={project.projectName}
                 />
-                <p>{project.name}</p>
-                <p>{project.title}</p>
+                <p>Projekt neve:{project.projectName}</p>
+                <p>Leírás: {project.title}</p>
+                <IconButton
+                  color="primary"
+                  aria-label="show more info about project"
+                  onClick={() => showMoreInfo(index)}
+                >
+                  <InfoIcon />
+                </IconButton>
               </div>
             ))}
           </div>
@@ -167,15 +179,11 @@ function App() {
           aria-labelledby="modal-modal-title"
           aria-describedby="modal-modal-description"
         >
-          <Box sx={style}>
+          <Box sx={BoxStyle}>
             <p>Projekt hozzáadása</p>
             <Stepper
-              steps={[
-                { label: "Project adatok" },
-                { label: "Kollégák" },
-                { label: "Linkek" },
-              ]}
-              activeStep={step}
+              steps={[{ label: "Project adatok" }, { label: "Kollégák" }, { label: "Linkek" }]}
+              activeStep={currentStepIndex}
               styleConfig={{
                 activeBgColor: "#2b7cff",
                 activeTextColor: "#fff",
@@ -193,42 +201,31 @@ function App() {
               stepClassName={"stepper__step"}
             />
 
-            <ProjectForm
-              step={step}
-              data={projectFormData}
-              setProjectFormData={setProjectFormData}
-            />
-
-            <div className="step-buttons">
-              <Button
-                variant="contained"
-                onClick={decreaseStep}
-                disabled={step < 1}
-              >
-                Vissza
-              </Button>
-
-              {step > 1 ? (
+            <form onSubmit={onSubmit}>
+              {formStep}
+              <div className="step-buttons">
+                <Button variant="contained" onClick={back} disabled={isFirstStep}>
+                  Vissza
+                </Button>
                 <Button
+                  type="submit"
                   variant="contained"
                   color="success"
-                  startIcon={<SaveIcon />}
-                  onClick={handleSubmit}
+                  startIcon={isLastStep ? <SaveIcon /> : ""}
+                  disabled={hasTextareaLengthError}
                 >
-                  Mentés
+                  {isLastStep ? "Mentés" : "Tovább"}
                 </Button>
-              ) : (
-                <Button
-                  variant="contained"
-                  onClick={increseStep}
-                  disabled={disableNextButton}
-                >
-                  Tovább
-                </Button>
-              )}
-            </div>
+              </div>
+            </form>
           </Box>
         </Modal>
+
+        <CardInfo
+          showCardInfo={showCardInfo}
+          handleCloseShowInfo={handleCloseShowInfo}
+          project={projects[showCardIndex]}
+        />
       </div>
     </div>
   );
